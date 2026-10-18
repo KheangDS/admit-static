@@ -3273,6 +3273,76 @@ footer {
     line-height: 1.2;
   }
 
+  .activity-detail-grid {
+    gap: 16px;
+  }
+
+  .partner-meta-card {
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .partner-meta-card > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 14px;
+    align-items: center;
+  }
+
+  .partner-meta-label {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+  }
+
+  .partner-logo-display {
+    height: 60px;
+    max-width: 150px;
+    padding: 8px;
+    margin-bottom: 0;
+    border-radius: 8px;
+  }
+
+  .partner-logo-display img {
+    max-height: 44px;
+  }
+
+  .partner-meta-card .partner-focus-value {
+    font-size: 15px;
+    overflow-wrap: anywhere;
+  }
+
+  .partner-date-block {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    padding-top: 10px;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .partner-date-row {
+    min-width: 0;
+  }
+
+  .partner-date-row span {
+    overflow-wrap: anywhere;
+  }
+
+  .activity-story-card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .activity-story-title {
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+
+  .activity-story-text {
+    margin-bottom: 0;
+    font-size: 15px;
+    text-align: left;
+  }
+
   .activity-detail-hero {
     height: auto;
   }
