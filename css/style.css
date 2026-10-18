@@ -543,6 +543,38 @@ th {
   flex-shrink: 0;
 }
 
+.closing .labeling-contact {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.closing .labeling-contact p {
+  font-size: 17px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.closing .labeling-contact strong {
+  color: #fff;
+}
+
+.closing .labeling-contact a {
+  color: #7dd3fc;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.closing .labeling-contact a:hover,
+.closing .labeling-contact a:focus-visible {
+  color: #fff;
+}
+
+.closing .labeling-contact a:focus-visible {
+  outline-color: #7dd3fc;
+}
+
 /* ==========================================================================
    6. Page-Specific Components
    ========================================================================== */
@@ -2748,9 +2780,26 @@ footer {
   overflow: hidden;
   background: #0f172a;
   border: 1px solid var(--border-subtle);
-  height: 420px;
+  height: auto;
+  aspect-ratio: auto;
   box-shadow: var(--shadow-sm);
   margin-bottom: 28px;
+}
+
+/* Detail photos use the available width and retain their natural proportions.
+   Card carousels keep their existing fixed-ratio layout. */
+.activity-detail-hero .carousel-track {
+  height: auto;
+  align-items: flex-start;
+}
+
+.activity-detail-hero .carousel-slide {
+  height: auto;
+}
+
+.activity-detail-hero .carousel-slide img {
+  width: 100%;
+  height: auto;
 }
 
 .carousel-arrow {
@@ -3201,7 +3250,7 @@ footer {
   }
 
   .activity-detail-hero {
-    height: 320px;
+    height: auto;
   }
 
   .contactgrid {
@@ -3225,7 +3274,7 @@ footer {
   }
 
   .activity-detail-hero {
-    height: 240px;
+    height: auto;
   }
 
   .share-apps-grid {
@@ -3397,9 +3446,8 @@ footer {
   }
 
   .activity-detail-hero {
-    height: auto !important;
-    aspect-ratio: 16 / 9;
-    min-height: 200px;
+    height: auto;
+    aspect-ratio: auto;
     border-radius: 12px;
     margin-bottom: 20px;
   }
