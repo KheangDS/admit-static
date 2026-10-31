@@ -1,0 +1,10 @@
+# Generated local test dependencies and output
+/node_modules/
+/test-results/
+/playwright-report/
+
+# Local-only browser tests and their tooling (not required by the website)
+/tests/
+/playwright.config.js
+/package.json
+/package-lock.json

@@ -153,9 +153,9 @@ header {
 }
 
 .navwrap {
-  max-width: 1350px;
+  max-width: 1244px;
   margin: auto;
-  padding: 18px 32px;
+  padding: 16px 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -582,15 +582,54 @@ th {
 /* Home Hero & Executive Workboard */
 .hero {
   display: grid;
-  grid-template-columns: 1.12fr 0.98fr;
-  gap: 56px;
-  padding-top: 68px;
-  padding-bottom: 68px;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 48px;
+  padding-top: 32px;
+  padding-bottom: 32px;
   align-items: center;
 }
 
+.hero + #routes {
+  padding-top: 32px;
+}
+
+@media (min-width: 961px) {
+  .hero {
+    max-width: 1280px;
+    gap: 56px;
+    min-height: calc(100vh - 78px);
+    min-height: calc(100svh - 78px);
+    padding-block: clamp(32px, 5vh, 64px);
+  }
+
+  .hero .workboard {
+    padding: 32px;
+  }
+
+  .hero .workboard h2 {
+    font-size: 34px;
+  }
+
+  .hero .sheet {
+    padding: 20px 24px;
+    margin-block: 20px;
+  }
+
+  .hero .sheet > div {
+    padding-block: 16px;
+  }
+}
+
+.hero h1 {
+  font-size: clamp(36px, 3.4vw, 52px);
+  line-height: 1.16;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  margin-bottom: 20px;
+}
+
 .workboard {
-  padding: 36px 32px;
+  padding: 24px 26px;
   background:
     radial-gradient(#cbd5e1 1px, transparent 1px),
     var(--surface-muted);
@@ -601,24 +640,28 @@ th {
 }
 
 .workboard h2 {
-  font-size: 34px;
-  margin-bottom: 18px;
+  font-size: 30px;
+  margin-bottom: 14px;
+}
+
+.workboard > .micro {
+  margin-bottom: 0;
 }
 
 .sheet {
   background: #fff;
-  padding: 24px 26px;
+  padding: 16px 20px;
   border: 1px solid var(--border-subtle);
   border-top: 4px solid var(--cyan-500);
   border-radius: 10px;
   box-shadow: var(--shadow-md);
-  margin: 22px 0;
+  margin: 16px 0;
 }
 
 .sheet > div {
   display: flex;
   gap: 14px;
-  padding: 16px 0;
+  padding: 12px 0;
   border-top: 1px solid var(--border-subtle);
   align-items: center;
 }
@@ -2192,7 +2235,7 @@ footer {
   }
 
   .hero h1 {
-    font-size: 44px;
+    font-size: 40px;
   }
 
   .cards.routes,
@@ -2625,15 +2668,31 @@ footer {
   z-index: 6;
 }
 
-@keyframes carousel-timer {
-  from { width: 0%; }
-  to { width: 100%; }
+/* Autoplay can pause or be disabled; do not display an unsynchronised timer. */
+.carousel-progress {
+  display: none;
 }
 
-.carousel-timer-bar {
-  height: 100%;
-  background: var(--cyan-500);
-  animation: carousel-timer 2s linear infinite;
+.carousel-pause {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 7;
+  padding: 6px 10px;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  color: #fff;
+  background: #160d50;
+  cursor: pointer;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 3px solid #087ba7;
+  outline-offset: 4px;
 }
 
 /* Card Body */
@@ -3402,6 +3461,8 @@ footer {
   *::before,
   *::after {
     transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -3454,6 +3515,11 @@ footer {
   .hero h1, h1 {
     font-size: clamp(30px, 7vw, 44px);
     line-height: 1.15;
+  }
+
+  .hero h1 {
+    font-size: clamp(30px, 6.4vw, 40px);
+    line-height: 1.2;
   }
 
   h2 {

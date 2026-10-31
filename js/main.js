@@ -2,6 +2,40 @@
  * ADMIT UNIT Website — Client-side Navigation & Enquiry Builder
  */
 
+const DEFAULT_META = {
+  title: document.title,
+  description: document.querySelector('meta[name="description"]').content,
+  image: document.querySelector('meta[property="og:image"]').content
+};
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const scrollBehavior = () => prefersReducedMotion.matches ? 'auto' : 'smooth';
+const appUrl = hash => new URL(hash || '#home', new URL('.', document.baseURI)).href;
+
+async function fetchJSON(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.headers.get('content-type')?.includes('application/json')) {
+      throw new Error('Expected application/json response');
+    }
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function copyText(text) {
+  try {
+    if (!navigator.clipboard?.writeText) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const menuButton = document.querySelector('.menu');
 const navElement = document.querySelector('nav');
 
@@ -118,10 +152,6 @@ if (menuButton && navElement) {
       moveIndicator(link);
     });
 
-    link.addEventListener('click', () => {
-      setActiveLink(link, null, false);
-      moveIndicator(link);
-    });
   });
 
   nav.addEventListener('mouseleave', () => {
@@ -160,7 +190,7 @@ if (menuButton && navElement) {
   // Expose global indicator controllers
   window.__setGlobalActiveNav = function(target) {
     if (!target) return;
-    let targetLink = typeof target === 'string' ? nav.querySelector(target) : target;
+    let targetLink = typeof target === 'string' ? null : target;
     if (!targetLink) {
       targetLink = navLinks.find(l => {
         const h = (l.getAttribute('href') || '').split('?')[0];
@@ -184,272 +214,119 @@ if (menuButton && navElement) {
   setActiveLink(activeLink, null, false);
   requestAnimationFrame(() => moveIndicator(activeLink, true));
 
-  // Handle clicking "Home" or Brand when on home to smoothly scroll to top
-  const brandLinks = Array.from(document.querySelectorAll('a.brand'));
-  [...brandLinks, ...navLinks].forEach(link => {
-    link.addEventListener('click', (event) => {
-      const href = link.getAttribute('href') || '';
-      if (href === '#home' || href === 'index.html' || href === '#') {
-        const homeView = document.querySelector('#view-home');
-        if (homeView && homeView.classList.contains('active')) {
-          if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {
-            event.preventDefault();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-            if (menuButton && navElement && navElement.classList.contains('open')) {
-              menuButton.setAttribute('aria-expanded', 'false');
-              navElement.classList.remove('open');
-            }
-          }
-        }
-      }
-    });
-  });
 
-  // Services page scrollspy for packages (#costing, #follow-up, #buyer-pack)
-  const servicesView = document.querySelector('#view-services');
-  const serviceSections = [
-    { id: 'costing', element: document.querySelector('#costing') },
-    { id: 'follow-up', element: document.querySelector('#follow-up') },
-    { id: 'buyer-pack', element: document.querySelector('#buyer-pack') }
-  ].filter(s => s.element);
-
-  if (serviceSections.length) {
-    window.addEventListener('scroll', () => {
-      if (!servicesView || !servicesView.classList.contains('active')) return;
-      const scrollY = window.scrollY || window.pageYOffset;
-      if (scrollY < 150) {
-        if (window.location.hash && window.location.hash !== '#services') {
-          window.history.replaceState(null, '', '#services');
-        }
-        return;
-      }
-
-      const detectLine = scrollY + window.innerHeight * 0.35;
-      let activeSec = null;
-      for (let i = 0; i < serviceSections.length; i++) {
-        const s = serviceSections[i];
-        const top = s.element.getBoundingClientRect().top + scrollY;
-        if (top <= detectLine) {
-          activeSec = s;
-        }
-      }
-      if (activeSec && window.location.hash !== '#' + activeSec.id) {
-        window.history.replaceState(null, '', '#' + activeSec.id);
-      }
-    }, { passive: true });
-  }
 })();
 
 const enquiryForm = document.querySelector('#enquiry');
+const PACKAGE_NAMES = {
+  'costing': 'Product Cost and Quotation Setup',
+  'follow-up': 'Customer Follow-up Setup',
+  'buyer-pack': 'Buyer Information Pack',
+  'packaging-design': 'Export Packaging Design and Labeling Compliance',
+  'label-compliance': 'Export Labeling Compliance for Existing Packaging'
+};
+
+window.applyEnquiryOptions = function(route = '', packageKey = '') {
+  if (!enquiryForm) return;
+  if (['BUSINESS', 'EXPORT', 'PROGRAMME'].includes(route)) {
+    enquiryForm.elements.route.value = route;
+  }
+  if (Object.hasOwn(PACKAGE_NAMES, packageKey)) {
+    enquiryForm.elements.objective.value = `I would like to discuss ${PACKAGE_NAMES[packageKey]}.`;
+  }
+  const selected = enquiryForm.elements.route.value;
+  for (const [id, enabled] of [['exportfields', selected === 'EXPORT'], ['programmefields', selected === 'PROGRAMME']]) {
+    const group = document.getElementById(id);
+    group.hidden = !enabled;
+    group.querySelectorAll('input').forEach(input => { input.disabled = !enabled; });
+  }
+};
 
 if (enquiryForm) {
-  const routeSelect = document.querySelector('#route');
-  const exportFields = document.querySelector('#exportfields');
-  const programmeFields = document.querySelector('#programmefields');
-  const emailCopyInput = document.querySelector('#emailcopy');
-  const emailOpenLink = document.querySelector('#emailopen');
-  const emailResultBox = document.querySelector('#emailresult');
-  const copyButton = document.querySelector('#copy');
-  const copyStatus = document.querySelector('#copystatus');
+  let sending = false;
+  const status = document.getElementById('contact-submit-status');
+  const preview = document.getElementById('emailresult');
+  const message = document.getElementById('emailcopy');
+  const copyStatus = document.getElementById('copystatus');
+  enquiryForm.elements.route.addEventListener('change', () => window.applyEnquiryOptions());
+  window.applyEnquiryOptions();
 
-  const queryParams = new URLSearchParams( window.location.search );
-  const requestedRoute = queryParams.get('route');
-  const requestedPackage = queryParams.get('package');
-
-  if (['BUSINESS', 'EXPORT', 'PROGRAMME'].includes(requestedRoute)) {
-    routeSelect.value = requestedRoute;
-  }
-
-  const packageNames = {
-    'costing': 'Product Cost and Quotation Setup',
-    'follow-up': 'Customer Follow-up Setup',
-    'buyer-pack': 'Buyer Information Pack',
-    'packaging-design': 'Export Packaging Design and Labeling Compliance',
-    'label-compliance': 'Export Labeling Compliance for Existing Packaging',
-  };
-
-  if (packageNames[requestedPackage]) {
-    enquiryForm.elements.objective.value = `I would like to discuss ${packageNames[requestedPackage]}.`;
-  }
-
-  function updateConditionalFields() {
-    exportFields.hidden = routeSelect.value !== 'EXPORT';
-    programmeFields.hidden = routeSelect.value !== 'PROGRAMME';
-  }
-
-  routeSelect.addEventListener('change', updateConditionalFields);
-  updateConditionalFields();
-
-  // Listen for clicks on internal CTA buttons with data-route or data-package
-  document.addEventListener('click', (event) => {
-    const trigger = event.target.closest('a[data-route], a[data-package]');
-    if (trigger) {
-      const r = trigger.getAttribute('data-route');
-      const p = trigger.getAttribute('data-package');
-      if (r && ['BUSINESS', 'EXPORT', 'PROGRAMME'].includes(r)) {
-        routeSelect.value = r;
-        updateConditionalFields();
-      }
-      if (p && packageNames[p] && enquiryForm.elements.objective) {
-        enquiryForm.elements.objective.value = `I would like to discuss ${packageNames[p]}.`;
-      }
-    }
+  document.getElementById('copy').addEventListener('click', async () => {
+    const copied = await copyText(message.value);
+    copyStatus.textContent = copied ? 'Message copied.' : 'Copy unavailable. Select and copy the message below.';
+    if (!copied) { message.focus(); message.select(); }
   });
 
-  enquiryForm.addEventListener('submit', async (event) => {
+  enquiryForm.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!enquiryForm.reportValidity()) {
-      return;
+    if (sending || !enquiryForm.reportValidity()) return;
+    for (const field of ['name', 'organization', 'contact', 'objective']) {
+      const input = enquiryForm.elements[field];
+      input.setCustomValidity(input.value.trim() ? '' : 'Please enter a value, not only spaces.');
+      if (!input.reportValidity()) {
+        input.addEventListener('input', () => input.setCustomValidity(''), { once: true });
+        return;
+      }
     }
 
-    const formData = new FormData(enquiryForm);
-    const routeVal = routeSelect.value;
-    const routeLabel = routeSelect.selectedOptions[0] ? routeSelect.selectedOptions[0].text : routeVal;
-    const name = (formData.get('name') || '').trim();
-    const organization = (formData.get('organization') || '').trim();
-    const contact = (formData.get('contact') || '').trim();
-    const objective = (formData.get('objective') || '').trim();
-    const product = (formData.get('product') || '').trim();
-    const timing = (formData.get('timing') || '').trim();
-    const market = (formData.get('market') || '').trim();
-    const cohort = (formData.get('cohort') || '').trim();
+    sending = true;
+    const submit = enquiryForm.querySelector('button[type="submit"]');
+    const original = submit.innerHTML;
+    submit.disabled = true;
+    submit.textContent = 'Sending enquiry…';
+    enquiryForm.setAttribute('aria-busy', 'true');
+    status.hidden = false;
+    status.textContent = 'Sending your enquiry…';
+    preview.hidden = true;
+    copyStatus.textContent = '';
 
-    const lines = [
-      'Hello ADMIT UNIT,',
-      'I would like to request a free 20-minute fit call.',
-      '',
-      `Service: ${routeLabel}`,
-      `Name: ${name}`,
-      `Organization: ${organization}`,
-      `Contact: ${contact}`,
-      `Objective: ${objective}`,
-      `Product or sector: ${product || 'Not specified'}`,
-      `Timing: ${timing || 'Flexible'}`,
-    ];
-
-    if (routeVal === 'EXPORT' && market) {
-      lines.push(`Market and buyer status: ${market}`);
-    }
-
-    if (routeVal === 'PROGRAMME' && cohort) {
-      lines.push(`Cohort, locations and budget: ${cohort}`);
-    }
-
-    const bodyText = lines.join('\n');
-    const subject = `${routeVal} enquiry - ${organization}`;
-    const fullClipboardText = `To: om@admitunit.asia\nSubject: ${subject}\n\n${bodyText}`;
-
-    const submitBtn = enquiryForm.querySelector('button[type="submit"]');
-    const statusNote = document.querySelector('#contact-submit-status');
-    const originalHtml = submitBtn ? submitBtn.innerHTML : '';
-
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = `<span>Sending email to ADMIT UNIT...</span>`;
-    }
-
+    const data = new FormData(enquiryForm);
+    const value = key => String(data.get(key) || '').trim();
+    const route = value('route');
+    const routeLabel = enquiryForm.elements.route.selectedOptions[0].text;
     const payload = {
-      route: routeVal,
-      route_label: routeLabel,
-      routeLabel: routeLabel,
-      name: name,
-      organization: organization,
-      contact: contact,
-      objective: objective,
-      product: product,
-      timing: timing,
-      market: market,
-      cohort: cohort,
-      subject: subject,
-      body_text: bodyText,
-      bodyText: bodyText
+      route, route_label: routeLabel, routeLabel,
+      name: value('name'), organization: value('organization'),
+      contact: value('contact'), objective: value('objective'),
+      product: value('product'), timing: value('timing'),
+      market: route === 'EXPORT' ? value('market') : '',
+      cohort: route === 'PROGRAMME' ? value('cohort') : ''
     };
-
-    const apiBase = (typeof window !== 'undefined' && (window.ADMIT_API_BASE || window.__ADMIT_API_BASE__)) || '/api';
-    const endpoint = (typeof window !== 'undefined' && window.ADMIT_API_ENDPOINT)
-      ? window.ADMIT_API_ENDPOINT
-      : `${apiBase.replace(/\/$/, '')}/send-enquiry`;
-
-    let emailSentDirectly = false;
+    const lines = [
+      'Hello ADMIT UNIT,', 'I would like to request a free 20-minute fit call.', '',
+      `Service: ${routeLabel}`, `Name: ${payload.name}`,
+      `Organization: ${payload.organization}`, `Contact: ${payload.contact}`,
+      `Objective: ${payload.objective}`,
+      `Product or sector: ${payload.product || 'Not specified'}`,
+      `Timing: ${payload.timing || 'Flexible'}`
+    ];
+    if (payload.market) lines.push(`Market and buyer status: ${payload.market}`);
+    if (payload.cohort) lines.push(`Cohort, locations and budget: ${payload.cohort}`);
+    payload.subject = `${route} enquiry - ${payload.organization}`;
+    payload.body_text = payload.bodyText = lines.join('\n');
 
     try {
-      const response = await fetch(endpoint, {
+      const endpoint = window.ADMIT_API_ENDPOINT || `${API_CONFIG.baseUrl}/send-enquiry`;
+      const result = await fetchJSON(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload)
       });
-
-      if (response.ok) {
-        const resData = await response.json().catch(() => ({}));
-        if (resData.success !== false) {
-          emailSentDirectly = true;
-        }
-      }
-    } catch (err) {
-      console.warn('[ADMIT UNIT] Direct email API failed, falling back to mail client:', err);
-    }
-
-    if (emailSentDirectly) {
-      // 1. Success feedback
-      if (submitBtn) {
-        submitBtn.innerHTML = `<span>Email sent to om@admitunit.asia!</span> <span aria-hidden="true">✓</span>`;
-        setTimeout(() => {
-          submitBtn.innerHTML = originalHtml;
-          submitBtn.disabled = false;
-        }, 5000);
-      }
-
-      if (statusNote) {
-        statusNote.innerHTML = `
-          <p>
-            <strong>Email successfully sent!</strong> Your enquiry has been delivered directly to <a href="mailto:om@admitunit.asia">om@admitunit.asia</a>. We will confirm fit, required inputs, and clear next steps within two business days.
-          </p>
-        `;
-        statusNote.hidden = false;
-      }
-
-      if (typeof showShareToast === 'function') {
-        showShareToast('Email sent directly to om@admitunit.asia!');
-      }
-
+      // An HTML fallback page, 204, or unrecognized JSON is NOT confirmation.
+      if (!result || result.success !== true) throw new Error('No explicit success acknowledgement');
+      status.textContent = 'Your enquiry was accepted by ADMIT UNIT. We aim to respond within two business days.';
       enquiryForm.reset();
-      updateConditionalFields();
-    } else {
-      // 2. Fallback: Copy to clipboard & open mailto client
-      try {
-        if (navigator.clipboard) {
-          await navigator.clipboard.writeText(fullClipboardText);
-        }
-      } catch (err) {
-        console.warn('Clipboard write error:', err);
-      }
-
-      const mailtoUrl = `mailto:om@admitunit.asia?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
-      window.location.href = mailtoUrl;
-
-      if (submitBtn) {
-        submitBtn.innerHTML = `<span>Opening email app &amp; message copied!</span> <span aria-hidden="true">✓</span>`;
-        setTimeout(() => {
-          submitBtn.innerHTML = originalHtml;
-          submitBtn.disabled = false;
-        }, 5000);
-      }
-
-      if (statusNote) {
-        statusNote.innerHTML = `
-          <p>
-            <strong>Opening your email app...</strong> We’ve copied your formatted message to your clipboard. If your email app didn’t launch automatically, simply paste into a new email to <a href="mailto:om@admitunit.asia">om@admitunit.asia</a>.
-          </p>
-        `;
-        statusNote.hidden = false;
-      }
-
-      if (typeof showShareToast === 'function') {
-        showShareToast('Message copied to clipboard! Opening email app...');
-      }
+      window.applyEnquiryOptions();
+    } catch (error) {
+      status.textContent = 'We could not confirm delivery. Your draft is preserved. You can retry, or send it yourself using the options below. If delivery was interrupted after acceptance, retrying may create a duplicate.';
+      message.value = `To: om@admitunit.asia\nSubject: ${payload.subject}\n\n${payload.body_text}`;
+      document.getElementById('emailopen').href = `mailto:om@admitunit.asia?subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(payload.body_text)}`;
+      preview.hidden = false;
+    } finally {
+      sending = false;
+      submit.disabled = false;
+      submit.innerHTML = original;
+      enquiryForm.removeAttribute('aria-busy');
     }
   });
 }
@@ -469,28 +346,66 @@ function escapeHtml(str) {
 }
 
 const API_CONFIG = {
-  baseUrl: (typeof window !== 'undefined' && (window.ADMIT_API_BASE || window.__ADMIT_API_BASE__)) || '/api',
-  endpoints: {
-    activities: '/activities',
-    activityDetail: (slug) => `/activities/${encodeURIComponent(slug)}`
-  }
+  baseUrl: (window.ADMIT_API_BASE || window.__ADMIT_API_BASE__ || '/api').replace(/\/$/, '')
 };
 
-const ACTIVITIES_REGISTRY = {};
+const ACTIVITIES_REGISTRY = Object.create(null);
 
-function renderSlideItemHTML(img, activity, index, total) {
-  if (typeof img === 'string') {
-    return `<div class="carousel-slide"><img src="${escapeHtml(img)}" alt="${escapeHtml(activity.title)} — photo ${index + 1}" loading="lazy"></div>`;
+function safeImageUrl(value, fallback = '') {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  try {
+    const url = new URL(value, document.baseURI);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : fallback;
+  } catch { return fallback; }
+}
+
+function normalizeActivity(value) {
+  if (!value || typeof value !== 'object' || typeof value.slug !== 'string' ||
+      !value.slug.trim() || typeof value.title !== 'string' || !value.title.trim()) return null;
+  const result = { slug: value.slug.trim(), title: value.title };
+  for (const field of ['description', 'partner', 'partnerLogo', 'focus', 'startDate', 'endDate']) {
+    result[field] = typeof value[field] === 'string' ? value[field] : '';
   }
-  if (img && (img.url || img.src)) {
-    const src = img.url || img.src;
+  result.images = Array.isArray(value.images) ? value.images.slice(0, 30).map(image => {
+    if (typeof image === 'string') return image;
+    const clean = {};
+    for (const field of ['url', 'src', 'title', 'subtitle', 'color']) {
+      if (image && typeof image[field] === 'string') clean[field] = image[field];
+    }
+    return clean;
+  }) : [];
+  return result;
+}
+
+function disposeCarousels(root) {
+  root.querySelectorAll('.carousel-container').forEach(container => container.__destroyCarousel?.());
+}
+
+function activityMeta(activity) {
+  const first = activity.images[0];
+  return {
+    title: activity.title,
+    description: activity.description || DEFAULT_META.description,
+    image: safeImageUrl(typeof first === 'string' ? first : first?.url || first?.src,
+      safeImageUrl(activity.partnerLogo, DEFAULT_META.image)),
+    url: getActivityShareUrl(activity.slug)
+  };
+}
+
+let slideGradientId = 0;
+function renderSlideItemHTML(img, activity, index, total) {
+  if (typeof img === 'string' && safeImageUrl(img)) {
+    return `<div class="carousel-slide"><img src="${escapeHtml(safeImageUrl(img))}" alt="${escapeHtml(activity.title)} — photo ${index + 1}" loading="lazy"></div>`;
+  }
+  if (img && safeImageUrl(img.url || img.src)) {
+    const src = safeImageUrl(img.url || img.src);
     return `<div class="carousel-slide"><img src="${escapeHtml(src)}" alt="${escapeHtml(img.title || activity.title)} — photo ${index + 1}" loading="lazy"></div>`;
   }
-  const color = (img && img.color) || '#087ba7';
+  const color = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(img?.color || '') ? img.color : '#087ba7';
   const slideTitle = (img && img.title) || activity.title;
   const slideSub = (img && img.subtitle) || activity.partner || '';
   const partnerName = activity.partner || 'ADMIT UNIT';
-  const actId = activity.id || 'act';
+  const actId = `slide-${++slideGradientId}`;
 
   return `<div class="carousel-slide">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" class="activity-slide-svg" style="width:100%;height:100%;display:block;">
@@ -519,13 +434,11 @@ function renderActivityCardHTML(activity) {
   ];
   const slideCount = imgs.length;
   const multi = slideCount > 1;
-  const trackImgs = multi ? [...imgs, imgs[0]] : imgs;
-
-  const slidesHtml = trackImgs.map((img, i) => renderSlideItemHTML(img, activity, i % slideCount, slideCount)).join('');
+  const slidesHtml = imgs.map((img, i) => renderSlideItemHTML(img, activity, i, slideCount)).join('');
   const dotsHtml = multi ? imgs.map((_, i) => `<button class="carousel-dot ${i === 0 ? 'active' : ''}" aria-label="Go to slide ${i + 1}"></button>`).join('') : '';
 
   const shareSlugEscaped = escapeHtml(activity.slug);
-  const detailHref = `activities/${shareSlugEscaped}`;
+  const detailHref = `#activity?slug=${escapeHtml(encodeURIComponent(activity.slug))}`;
 
   return `
     <article class="activity-card" data-slug="${shareSlugEscaped}">
@@ -558,7 +471,7 @@ function renderActivityCardHTML(activity) {
             <span>View activity details</span>
             <span>→</span>
           </a>
-          <button type="button" onclick="openShareModal('${shareSlugEscaped}')" class="activity-share-btn">
+          <button type="button" data-share-slug="${shareSlugEscaped}" class="activity-share-btn">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
               <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
             </svg>
@@ -583,11 +496,12 @@ function renderActivitiesEmptyState() {
           <line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
       </div>
-      <h3>No Activities Published Yet</h3>
-      <p>Our upcoming trade development programmes and cohort activities will appear here once officially scheduled.</p>
+      <h3>Not Found</h3>
+      <p>No activities are available at the moment.</p>
     </div>
   `;
   containers.forEach(container => {
+    disposeCarousels(container);
     container.innerHTML = emptyHtml;
   });
 }
@@ -603,77 +517,57 @@ function renderActivitiesGrid(list) {
 
   const html = list.map(act => renderActivityCardHTML(act)).join('');
   containers.forEach(container => {
+    disposeCarousels(container);
     container.innerHTML = html;
     container.querySelectorAll('.carousel-container').forEach(initCarousel);
   });
 }
 
 async function loadActivitiesFromAPI() {
-  const apiBase = (typeof window !== 'undefined' && (window.ADMIT_API_BASE || window.__ADMIT_API_BASE__)) || API_CONFIG.baseUrl;
-  const endpoint = `${apiBase.replace(/\/$/, '')}/activities`;
-
   try {
-    const res = await fetch(endpoint, {
+    const data = await fetchJSON(`${API_CONFIG.baseUrl}/activities`, {
       headers: { 'Accept': 'application/json' }
     });
-    if (!res.ok) {
-      throw new Error(`API responded with HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    const activitiesList = Array.isArray(data) ? data : (data.activities || data.data || []);
-
-    if (Array.isArray(activitiesList) && activitiesList.length > 0) {
-      activitiesList.forEach(act => {
-        if (act && act.slug) {
-          ACTIVITIES_REGISTRY[act.slug] = act;
-        }
-      });
-      renderActivitiesGrid(activitiesList);
-      console.log(`[ADMIT UNIT] Loaded ${activitiesList.length} dynamic activities from API`);
-      return activitiesList;
-    } else {
-      renderActivitiesEmptyState();
-      return [];
-    }
-  } catch (err) {
-    console.info('[ADMIT UNIT] API not reachable or error:', err.message);
-    const currentRegistered = Object.values(ACTIVITIES_REGISTRY);
-    if (currentRegistered.length > 0) {
-      renderActivitiesGrid(currentRegistered);
-      return currentRegistered;
-    } else {
-      renderActivitiesEmptyState();
-      return [];
-    }
+    const list = Array.isArray(data) ? data : data?.activities ?? data?.data;
+    if (!Array.isArray(list)) throw new Error('Invalid activity list');
+    const activities = list.map(normalizeActivity).filter(Boolean);
+    if (list.length && !activities.length) throw new Error('No valid activities in response');
+    activities.forEach(activity => { ACTIVITIES_REGISTRY[activity.slug] = activity; });
+    renderActivitiesGrid(activities);
+    return activities;
+  } catch (error) {
+    document.querySelectorAll('.activity-cards-grid').forEach(container => {
+      disposeCarousels(container);
+      container.innerHTML = '<div class="activity-empty-banner" role="status"><h3>Not Found</h3><p>Unable to load activities. Please try again shortly.</p><button type="button" class="button secondary" data-retry-activities>Try again</button></div>';
+    });
+    return [];
   }
 }
 
 async function fetchActivityDetailFromAPI(slug) {
   if (!slug) return null;
-  if (ACTIVITIES_REGISTRY[slug]) return ACTIVITIES_REGISTRY[slug];
-
-  const apiBase = (typeof window !== 'undefined' && (window.ADMIT_API_BASE || window.__ADMIT_API_BASE__)) || API_CONFIG.baseUrl;
-  const endpoint = `${apiBase.replace(/\/$/, '')}/activities/${encodeURIComponent(slug)}`;
-
   try {
-    const res = await fetch(endpoint, {
+    const data = await fetchJSON(`${API_CONFIG.baseUrl}/activities/${encodeURIComponent(slug)}`, {
       headers: { 'Accept': 'application/json' }
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const activity = data.activity || data.data || data;
-    if (activity && activity.slug) {
-      ACTIVITIES_REGISTRY[activity.slug] = activity;
-      return activity;
-    }
-  } catch (err) {
-    console.warn(`[ADMIT UNIT] Could not fetch detail for activity slug "${slug}":`, err.message);
+    const activity = normalizeActivity(data?.activity || data?.data || data);
+    if (!activity || activity.slug !== slug) throw new Error('Invalid activity detail');
+    ACTIVITIES_REGISTRY[slug] = activity;
+    return activity;
+  } catch (error) {
+    // Do not mistake a failed request for a successful detail response.
+    return null;
   }
-  return null;
 }
 
+document.addEventListener('click', event => {
+  const share = event.target.closest('[data-share-slug]');
+  if (share) openShareModal(share.dataset.shareSlug);
+  if (event.target.closest('[data-retry-activities]')) loadActivitiesFromAPI();
+});
+
 function updateMetaTags({ title, description, image, url }) {
-  document.title = 'ADMIT UNIT · The Standard Implementer';
+  document.title = title ? (title.includes('ADMIT UNIT') ? title : `${title} — ADMIT UNIT`) : DEFAULT_META.title;
 
   function setMeta(selector, attr, value) {
     if (!value) return;
@@ -719,162 +613,152 @@ function updateMetaTags({ title, description, image, url }) {
   }
 }
 
+const carouselControllers = new Set();
+function syncCarousels() {
+  carouselControllers.forEach(controller => controller.sync());
+}
+document.addEventListener('visibilitychange', syncCarousels);
+prefersReducedMotion.addEventListener('change', syncCarousels);
+window.addEventListener('pagehide', () => {
+  carouselControllers.forEach(controller => controller.destroy());
+});
+window.addEventListener('pageshow', event => {
+  if (event.persisted) document.querySelectorAll('.carousel-container').forEach(initCarousel);
+});
+
 function initCarousel(container) {
+  container.__destroyCarousel?.();
   const track = container.querySelector('.carousel-track');
-  if (!track) return;
-  const slideCount = parseInt(container.dataset.slideCount || track.children.length, 10);
-  if (slideCount <= 1) return;
+  const count = Number(container.dataset.slideCount);
+  if (!track || !Number.isInteger(count) || count <= 1) {
+    const counter = container.querySelector('.carousel-counter-badge');
+    if (counter) counter.textContent = '1 / 1';
+    return;
+  }
 
-  const dotsContainer = container.querySelector('.carousel-dots');
-  const counterEl = container.querySelector('.carousel-counter-badge, .carousel-counter');
-  const prevBtn = container.querySelector('.carousel-arrow.prev');
-  const nextBtn = container.querySelector('.carousel-arrow.next');
-
-  let trackIndex = 0;
+  const events = new AbortController();
+  let index = 0;
   let timer = null;
-  let resetTimeout = null;
-  let isPaused = false;
-  const TRANSITION_CSS = 'transform 0.55s cubic-bezier(0.22, 1, 0.36, 1)';
+  let paused = prefersReducedMotion.matches;
+  let hovered = false;
+  let focused = false;
+  let visible = true;
+  const pause = document.createElement('button');
+  pause.type = 'button';
+  pause.className = 'carousel-pause';
+  container.appendChild(pause);
+  const on = (element, type, handler) => element?.addEventListener(type, handler, { signal: events.signal });
 
-  function setPos(idx, animate = true) {
-    track.style.transition = animate ? TRANSITION_CSS : 'none';
-    track.style.transform = `translateX(-${idx * 100}%)`;
-    if (!animate) void track.offsetWidth;
-  }
-
-  function updateDots(realIdx) {
-    if (counterEl) {
-      counterEl.textContent = `${realIdx + 1} / ${slideCount}`;
-    }
-    if (dotsContainer) {
-      Array.from(dotsContainer.children).forEach((dot, idx) => {
-        dot.classList.toggle('active', idx === realIdx);
-      });
-    }
-  }
-
-  function next() {
-    clearTimeout(resetTimeout);
-    if (trackIndex >= slideCount) {
-      trackIndex = 0;
-      setPos(0, false);
-    }
-    trackIndex++;
-    setPos(trackIndex, true);
-    const realIdx = trackIndex % slideCount;
-    updateDots(realIdx);
-
-    if (trackIndex === slideCount) {
-      resetTimeout = setTimeout(() => {
-        trackIndex = 0;
-        setPos(0, false);
-      }, 560);
-    }
-  }
-
-  function prev() {
-    clearTimeout(resetTimeout);
-    if (trackIndex === 0) {
-      trackIndex = slideCount;
-      setPos(trackIndex, false);
-    }
-    trackIndex--;
-    setPos(trackIndex, true);
-    updateDots(trackIndex % slideCount);
-    restartTimer();
-  }
-
-  function start() {
-    clearInterval(timer);
-    timer = setInterval(() => {
-      if (!isPaused) next();
-    }, 2000);
-  }
-
-  function restartTimer() {
-    start();
-  }
-
-  container.addEventListener('mouseenter', () => { isPaused = true; });
-  container.addEventListener('mouseleave', () => { isPaused = false; });
-  container.addEventListener('touchstart', () => { isPaused = true; }, { passive: true });
-  container.addEventListener('touchend', () => { isPaused = false; }, { passive: true });
-
-  if (nextBtn) nextBtn.addEventListener('click', () => { next(); restartTimer(); });
-  if (prevBtn) prevBtn.addEventListener('click', prev);
-
-  if (dotsContainer) {
-    Array.from(dotsContainer.children).forEach((dot, idx) => {
-      dot.addEventListener('click', () => {
-        clearTimeout(resetTimeout);
-        if (trackIndex === slideCount) setPos(0, false);
-        trackIndex = idx;
-        setPos(trackIndex, true);
-        updateDots(idx);
-        restartTimer();
-      });
+  function show(next) {
+    index = (next + count) % count;
+    track.style.transition = prefersReducedMotion.matches ? 'none' : 'transform 0.55s ease';
+    track.style.transform = `translateX(-${index * 100}%)`;
+    container.querySelectorAll('.carousel-dot').forEach((dot, i) => {
+      dot.classList.toggle('active', i === index);
+      dot.setAttribute('aria-pressed', String(i === index));
+    });
+    const counter = container.querySelector('.carousel-counter-badge, .carousel-counter');
+    if (counter) counter.textContent = `${index + 1} / ${count}`;
+    Array.from(track.children).forEach((slide, i) => {
+      slide.setAttribute('aria-hidden', String(i !== index));
     });
   }
 
-  start();
+  const controller = {
+    sync() {
+      clearInterval(timer);
+      timer = null;
+      const view = container.closest('.page-view');
+      const playing = container.isConnected && (!view || view.classList.contains('active')) &&
+        visible && !document.hidden && !prefersReducedMotion.matches && !paused && !hovered && !focused;
+      container.dataset.playing = String(playing);
+      pause.textContent = paused ? 'Play slides' : 'Pause slides';
+      pause.setAttribute('aria-pressed', String(paused));
+      if (playing) timer = setInterval(() => show(index + 1), 5000);
+    },
+    destroy() {
+      clearInterval(timer);
+      observer?.disconnect();
+      events.abort();
+      pause.remove();
+      carouselControllers.delete(controller);
+      delete container.__destroyCarousel;
+    }
+  };
+  const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
+    visible = entries[0].isIntersecting;
+    controller.sync();
+  }) : null;
+  observer?.observe(container);
+  container.__destroyCarousel = controller.destroy;
+  carouselControllers.add(controller);
+
+  on(pause, 'click', () => { paused = !paused; controller.sync(); });
+  on(container, 'mouseenter', () => { hovered = true; controller.sync(); });
+  on(container, 'mouseleave', () => { hovered = false; controller.sync(); });
+  on(container, 'focusin', () => { focused = true; controller.sync(); });
+  on(container, 'focusout', event => {
+    focused = container.contains(event.relatedTarget);
+    controller.sync();
+  });
+  on(container.querySelector('.carousel-arrow.next'), 'click', () => { show(index + 1); controller.sync(); });
+  on(container.querySelector('.carousel-arrow.prev'), 'click', () => { show(index - 1); controller.sync(); });
+  container.querySelectorAll('.carousel-dot').forEach((dot, i) => {
+    on(dot, 'click', () => { show(i); controller.sync(); });
+  });
+  show(0);
+  controller.sync();
 }
 
 // Share Modal Controller
 let currentShareSlug = '';
 
-function getActivityShareUrl(slug) {
-  const targetSlug = slug || currentShareSlug;
-  if (!targetSlug) return 'https://admitunit.asia/activities';
-
-  if (typeof window !== 'undefined' && window.location) {
-    const loc = window.location;
-    if (loc.protocol.startsWith('http') && !['localhost', '127.0.0.1'].includes(loc.hostname)) {
-      return `${loc.origin}/activities/${targetSlug}`;
-    }
-  }
-
-  // Clean, modern enterprise URL without .html
-  return `https://admitunit.asia/activities/${targetSlug}`;
+function getActivityShareUrl(slug = '') {
+  return appUrl(slug ? `#activity?slug=${encodeURIComponent(slug)}` : '#activities');
 }
 
-function openShareModal(slug) {
-  if (slug && ACTIVITIES_REGISTRY[slug]) {
-    currentShareSlug = slug;
-  }
-  const activity = currentShareSlug ? ACTIVITIES_REGISTRY[currentShareSlug] : null;
-  if (!activity) return;
+let modalReturnFocus = null;
+let modalBackground = [];
+let modalOverflow = '';
 
-  const modal = document.querySelector('#share-modal');
-  if (!modal) return;
-
-  const titleEl = modal.querySelector('[data-share-title]');
-  if (titleEl) titleEl.textContent = activity.title;
-
-  const urlInput = modal.querySelector('#share-modal-url');
-  const shareUrl = getActivityShareUrl(activity.slug);
-  if (urlInput) {
-    urlInput.value = shareUrl;
-    urlInput.title = shareUrl;
-  }
-
+function openShareModal(slug = currentShareSlug) {
+  const activity = ACTIVITIES_REGISTRY[slug];
+  const modal = document.getElementById('share-modal');
+  if (!activity || !modal) return;
+  currentShareSlug = slug;
+  modal.querySelector('[data-share-title]').textContent = activity.title;
+  const input = document.getElementById('share-modal-url');
+  input.value = input.title = getActivityShareUrl(slug);
+  document.getElementById('share-copy-label').textContent = 'Copy Link';
+  if (!modal.classList.contains('hidden')) return;
+  modalReturnFocus = document.activeElement;
+  modalBackground = Array.from(document.body.children)
+    .filter(element => element !== modal && element.id !== 'share-toast' && !['SCRIPT', 'STYLE'].includes(element.tagName))
+    .map(element => [element, element.inert]);
+  modalBackground.forEach(([element]) => { element.inert = true; });
+  modalOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
   modal.classList.remove('hidden');
+  modal.querySelector('button').focus();
 }
 
 function closeShareModal() {
-  const modal = document.querySelector('#share-modal');
-  if (modal) modal.classList.add('hidden');
+  const modal = document.getElementById('share-modal');
+  if (!modal || modal.classList.contains('hidden')) return;
+  modal.classList.add('hidden');
+  document.body.style.overflow = modalOverflow;
+  modalBackground.forEach(([element, inert]) => { element.inert = inert; });
+  modalBackground = [];
+  if (modalReturnFocus?.isConnected && !modalReturnFocus.closest('.page-view:not(.active)')) {
+    modalReturnFocus.focus();
+  }
 }
 
-function handleShareApp(platform) {
-  const activity = currentShareSlug ? ACTIVITIES_REGISTRY[currentShareSlug] : null;
+async function handleShareApp(platform) {
+  const activity = ACTIVITIES_REGISTRY[currentShareSlug];
   if (!activity) return;
-
   const shareUrl = getActivityShareUrl(activity.slug);
   const shareText = `${activity.title} — ADMIT UNIT & ${activity.partner || 'ADMIT UNIT'}`;
-
-  // Always copy share link to clipboard for convenience
-  navigator.clipboard?.writeText(shareUrl);
-
   const urls = {
     telegram: `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`,
     facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
@@ -882,38 +766,26 @@ function handleShareApp(platform) {
     whatsapp: `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText + ' ' + shareUrl)}`,
     twitter: `https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`
   };
-
-  if (urls[platform]) {
+  if (Object.hasOwn(urls, platform)) {
     window.open(urls[platform], '_blank', 'noopener,noreferrer,width=640,height=560');
-    showShareToast(`Opening ${platform.charAt(0).toUpperCase() + platform.slice(1)}...`);
     closeShareModal();
-  } else if (platform === 'tiktok') {
-    window.open('https://www.tiktok.com', '_blank', 'noopener,noreferrer');
-    showShareToast('Link copied! Opening TikTok...');
-    closeShareModal();
-  } else if (platform === 'instagram') {
-    window.open('https://www.instagram.com', '_blank', 'noopener,noreferrer');
-    showShareToast('Link copied! Opening Instagram...');
-    closeShareModal();
-  } else {
-    showShareToast(`Link copied: ${shareUrl}`);
-    closeShareModal();
+    return;
+  }
+  if (platform === 'tiktok' || platform === 'instagram') {
+    window.open(platform === 'tiktok' ? 'https://www.tiktok.com' : 'https://www.instagram.com', '_blank', 'noopener,noreferrer');
+    // These platforms have no web URL-sharing endpoint.
+    await copyShareUrl();
   }
 }
 
-function copyShareUrl() {
-  const activity = currentShareSlug ? ACTIVITIES_REGISTRY[currentShareSlug] : null;
-  if (!activity) return;
-
-  const shareUrl = getActivityShareUrl(activity.slug);
-  const btnLabel = document.querySelector('#share-copy-label');
-
-  navigator.clipboard?.writeText(shareUrl);
-  if (btnLabel) {
-    btnLabel.textContent = 'Copied!';
-    setTimeout(() => { btnLabel.textContent = 'Copy Link'; }, 2000);
-  }
-  showShareToast('Link copied to clipboard!');
+async function copyShareUrl() {
+  const input = document.getElementById('share-modal-url');
+  const label = document.getElementById('share-copy-label');
+  if (!input || !currentShareSlug) return;
+  const copied = await copyText(getActivityShareUrl(currentShareSlug));
+  label.textContent = copied ? 'Copied!' : 'Select & copy';
+  showShareToast(copied ? 'Link copied to clipboard!' : 'Clipboard unavailable. Select and copy the link.');
+  if (!copied) { input.focus(); input.select(); }
 }
 
 function showShareToast(message) {
@@ -922,6 +794,7 @@ function showShareToast(message) {
     toast = document.createElement('div');
     toast.id = 'share-toast';
     toast.className = 'share-toast';
+    toast.setAttribute('role', 'status');
     toast.innerHTML = `<span class="share-toast-dot"></span><span id="share-toast-text">${escapeHtml(message)}</span>`;
     document.body.appendChild(toast);
   } else {
@@ -938,7 +811,18 @@ function showShareToast(message) {
 
 // Global modal background close & Escape key
 document.addEventListener('keydown', (e) => {
+  const modal = document.getElementById('share-modal');
+  if (!modal || modal.classList.contains('hidden')) return;
   if (e.key === 'Escape') closeShareModal();
+  if (e.key === 'Tab') {
+    const controls = Array.from(modal.querySelectorAll('button, input, a[href], [tabindex="0"]'));
+    const first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+      e.preventDefault(); first.focus();
+    }
+  }
 });
 
 const modalBackdrop = document.querySelector('#share-modal');
@@ -948,106 +832,9 @@ if (modalBackdrop) {
   });
 }
 
-// Initialize carousels & load activities on page load
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.carousel-container').forEach(initCarousel);
-
-  // If on activity.html standalone detail page
-  const detailContainer = document.querySelector('[data-activity-detail-page]');
-  if (detailContainer) {
-    const contentEl = detailContainer.querySelector('#activity-detail-content');
-    const notFoundEl = detailContainer.querySelector('#activity-detail-not-found');
-    const params = new URLSearchParams(window.location.search);
-    const requestedSlug = params.get('slug');
-
-    (async () => {
-      let activity = (requestedSlug && ACTIVITIES_REGISTRY[requestedSlug]) ? ACTIVITIES_REGISTRY[requestedSlug] : null;
-      if (!activity && requestedSlug) {
-        activity = await fetchActivityDetailFromAPI(requestedSlug);
-      }
-
-      if (!activity) {
-        if (contentEl) contentEl.style.display = 'none';
-        if (notFoundEl) notFoundEl.style.display = 'block';
-        return;
-      }
-
-      if (contentEl) contentEl.style.display = 'block';
-      if (notFoundEl) notFoundEl.style.display = 'none';
-
-      document.title = 'ADMIT UNIT · The Standard Implementer';
-
-      const titleEl = detailContainer.querySelector('[data-field="title"]');
-      if (titleEl) titleEl.textContent = activity.title;
-
-      const slugEl = detailContainer.querySelector('[data-field="slug"]');
-      if (slugEl) slugEl.textContent = `/activities/${activity.slug}`;
-
-      const partnerLogo = detailContainer.querySelector('[data-field="partnerLogo"]');
-      if (partnerLogo) {
-        partnerLogo.src = activity.partnerLogo || 'assets/admit-unit-logo.png';
-        partnerLogo.alt = activity.partner || 'Partner';
-      }
-
-      const partnerName = detailContainer.querySelector('[data-field="partner"]');
-      if (partnerName) partnerName.textContent = activity.partner || '';
-
-      const focusEl = detailContainer.querySelector('[data-field="focus"]');
-      if (focusEl) focusEl.textContent = activity.focus || '';
-
-      const dateRangeEl = detailContainer.querySelector('[data-field="dateRange"]');
-      if (dateRangeEl) {
-        const dates = [activity.startDate, activity.endDate].filter(Boolean).join(' – ');
-        dateRangeEl.textContent = dates || 'Ongoing';
-      }
-
-      const descEl = detailContainer.querySelector('[data-field="description"]');
-      if (descEl) descEl.textContent = activity.description || '';
-
-      const heroContainer = detailContainer.querySelector('.carousel-container');
-      const heroTrack = heroContainer ? heroContainer.querySelector('.carousel-track') : null;
-      const heroDots = heroContainer ? heroContainer.querySelector('.carousel-dots') : null;
-
-      if (heroContainer && heroTrack) {
-        const imgs = activity.images || [];
-        const multi = imgs.length > 1;
-        const trackImgs = multi ? [...imgs, imgs[0]] : imgs;
-
-        heroTrack.innerHTML = trackImgs.map((img, i) => renderSlideItemHTML(img, activity, i % imgs.length, imgs.length)).join('');
-        heroContainer.dataset.slideCount = imgs.length;
-
-        if (heroDots) {
-          heroDots.innerHTML = imgs.map((_, i) => `<button class="carousel-dot ${i === 0 ? 'active' : ''}" aria-label="Go to slide ${i + 1}"></button>`).join('');
-        }
-
-        const arrows = heroContainer.querySelectorAll('.carousel-arrow');
-        arrows.forEach(arr => { arr.style.display = multi ? 'flex' : 'none'; });
-
-        initCarousel(heroContainer);
-      }
-
-      currentShareSlug = activity.slug;
-      updateMetaTags({
-        title: activity.title,
-        description: activity.description,
-        image: (activity.images && activity.images[0] && typeof activity.images[0] === 'string') 
-                 ? activity.images[0] 
-                 : (activity.partnerLogo || 'https://admitunit.asia/assets/admit-unit-light.png'),
-        url: getActivityShareUrl(activity.slug)
-      });
-    })();
-  }
-
-  const shareInput = document.querySelector('#share-modal-url');
-  if (shareInput && currentShareSlug) {
-    shareInput.value = getActivityShareUrl(currentShareSlug);
-    shareInput.title = shareInput.value;
-  }
-
-  // Load dynamic activities from API in background
   loadActivitiesFromAPI();
 });
-
 
 
 /* ==========================================================================
@@ -1055,456 +842,184 @@ document.addEventListener('DOMContentLoaded', () => {
    ========================================================================== */
 
 (function initBundleRouter() {
-  const pageViews = Array.from(document.querySelectorAll('.page-view'));
-  const navLinks = Array.from(document.querySelectorAll('header nav a'));
-
-  const PAGE_MAP = {
-    '': 'view-home',
-    '/': 'view-home',
-    'home': 'view-home',
-    '#home': 'view-home',
-    'index.html': 'view-home',
-    'admit-unit': 'view-home',
-    'services': 'view-services',
-    '#services': 'view-services',
-    'services.html': 'view-services',
-    'export': 'view-export',
-    '#export': 'view-export',
-    'export.html': 'view-export',
-    'export-labeling': 'view-export-labeling',
-    '#export-labeling': 'view-export-labeling',
-    'export-labeling.html': 'view-export-labeling',
-    'programmes': 'view-programmes',
-    '#programmes': 'view-programmes',
-    'programmes.html': 'view-programmes',
-    'about': 'view-about',
-    '#about': 'view-about',
-    'about.html': 'view-about',
-    'activities': 'view-activities',
-    '#activities': 'view-activities',
-    'activities.html': 'view-activities',
-    'contact': 'view-contact',
-    '#contact': 'view-contact',
-    'contact.html': 'view-contact',
-    'activity': 'view-activity',
-    '#activity': 'view-activity',
-    'activity.html': 'view-activity',
-    'terms': 'view-terms',
-    '#terms': 'view-terms',
-    'terms.html': 'view-terms'
+  const views = Array.from(document.querySelectorAll('.page-view'));
+  const pages = new Set(views.map(view => view.id.replace('view-', '')));
+  const aliases = {
+    'khmer-enterprise-2025': 'export-market-development-program-2025',
+    'usaid-2024-2025': 'usaid-export-market-development-2024-2025',
+    'giz-export-packaging': 'export-labeling-and-packaging-for-market-entry'
   };
-
-  const NAV_PAGE_MAP = {
-    'view-home': '#home',
-    'view-services': '#services',
-    'view-export': '#export',
-    'view-export-labeling': '#export-labeling',
-    'view-programmes': '#programmes',
-    'view-about': '#about',
-    'view-activities': '#activities',
-    'view-contact': '#contact',
-    'view-activity': '#activities',
-    'view-terms': '#terms'
+  const titles = {
+    home: DEFAULT_META.title, services: 'Business Implementation — ADMIT UNIT',
+    export: 'Export Market Development — ADMIT UNIT',
+    'export-labeling': 'Export Labeling & Packaging — ADMIT UNIT',
+    programmes: 'Institutional Programmes — ADMIT UNIT', about: 'Our Role & Ecosystem — ADMIT UNIT',
+    activities: 'Activities & Updates — ADMIT UNIT', activity: 'Activity — ADMIT UNIT',
+    contact: 'Contact & Brief Builder — ADMIT UNIT', terms: 'Service Terms & Privacy — ADMIT UNIT'
   };
-
-  const VIEW_TITLES = {
-    'view-home': 'ADMIT UNIT · The Standard Implementer',
-    'view-services': 'ADMIT UNIT · Business Implementation',
-    'view-export': 'ADMIT UNIT · Export Market Development',
-    'view-export-labeling': 'ADMIT UNIT · Export Labeling & Packaging',
-    'view-programmes': 'ADMIT UNIT · Institutional Programmes',
-    'view-about': 'ADMIT UNIT · Our Role & Ecosystem',
-    'view-activities': 'ADMIT UNIT · Activities & Updates',
-    'view-contact': 'ADMIT UNIT · Contact & Brief Builder',
-    'view-terms': 'ADMIT UNIT · Service Terms & Privacy'
-  };
-
-  function getCleanUrlForView(viewId, slug = '', hash = '', route = '', packageKey = '') {
-    if (viewId === 'view-activity') {
-      const targetSlug = slug || currentShareSlug;
-      return targetSlug ? `#activity?slug=${encodeURIComponent(targetSlug)}` : '#activities';
+  let navigationId = 0;
+  let lastLocation = '';
+  function decode(value) {
+    try { return decodeURIComponent(value); } catch { return value; }
+  }
+  function resolveRoute(url) {
+    const raw = url.hash.slice(1);
+    const [namePart, query = ''] = raw.split('?');
+    const [name, section = ''] = namePart.split('#');
+    const hashParams = new URLSearchParams(query);
+    const search = new URLSearchParams(url.search);
+    const param = key => hashParams.get(key) || search.get(key) || '';
+    const basePath = new URL('.', document.baseURI).pathname;
+    let target = name || url.pathname.slice(basePath.length);
+    target = decode(target).replace(/^\/+|\/+$/g, '').replace(/\.html$/, '');
+    if (!target || target === 'index') target = 'home';
+    if (Object.hasOwn(aliases, target)) return { page: 'activity', slug: aliases[target] };
+    if (target.startsWith('activity-')) return { page: 'activity', slug: target.slice(9) };
+    if (target.startsWith('activities/')) return { page: 'activity', slug: target.slice(11) };
+    if (!raw && search.get('slug')) return { page: 'activity', slug: search.get('slug') };
+    if (pages.has(target)) return {
+      page: target, slug: target === 'activity' ? param('slug') : '',
+      route: target === 'contact' ? param('route') : '',
+      packageKey: target === 'contact' ? param('package') : '',
+      section: section || hashParams.get('scroll') || ''
+    };
+    const element = document.getElementById(target);
+    const view = element?.closest('.page-view');
+    return view ? { page: view.id.replace('view-', ''), section: target } : null;
+  }
+  function routeHash(route) {
+    const params = new URLSearchParams();
+    if (route.page === 'activity' && route.slug) params.set('slug', route.slug);
+    if (route.page === 'contact') {
+      if (route.route) params.set('route', route.route);
+      if (route.packageKey) params.set('package', route.packageKey);
     }
-
-    const shortId = viewId.replace('view-', '');
-    let queryParts = [];
-    if (viewId === 'view-contact') {
-      if (route) queryParts.push(`route=${encodeURIComponent(route)}`);
-      if (packageKey) queryParts.push(`package=${encodeURIComponent(packageKey)}`);
-    }
-    const queryString = queryParts.length ? `?${queryParts.join('&')}` : '';
-    const hashString = hash ? (queryString ? `&scroll=${hash}` : `#${hash}`) : '';
-
-    if (shortId === 'home' && !queryString && !hashString) {
-      return '#home';
-    }
-    return `#${shortId}${queryString}${hashString}`;
+    if (route.section) params.set('scroll', route.section);
+    return `#${route.page}${params.size ? '?' + params.toString() : ''}`;
   }
 
-  window.loadActivityInBundle = async function(slug) {
-    const detailContainer = document.querySelector('#view-activity [data-activity-detail-page]');
-    if (!detailContainer) return;
-
-    const contentEl = detailContainer.querySelector('#activity-detail-content');
-    const notFoundEl = detailContainer.querySelector('#activity-detail-not-found');
-
-    let activity = (slug && ACTIVITIES_REGISTRY[slug]) ? ACTIVITIES_REGISTRY[slug] : null;
-    if (!activity && slug && typeof fetchActivityDetailFromAPI === 'function') {
-      activity = await fetchActivityDetailFromAPI(slug);
+  async function renderDetail(slug, id) {
+    const root = document.querySelector('#view-activity [data-activity-detail-page]');
+    const content = root.querySelector('#activity-detail-content');
+    const unavailable = root.querySelector('#activity-detail-not-found');
+    const loading = document.getElementById('activity-detail-loading');
+    disposeCarousels(root);
+    content.style.display = 'none';
+    unavailable.style.display = 'none';
+    loading.hidden = false;
+    currentShareSlug = '';
+    const activity = await fetchActivityDetailFromAPI(slug);
+    if (id !== navigationId) return;
+    loading.hidden = true;
+    if (!activity) { unavailable.style.display = 'block'; return; }
+    for (const field of ['title', 'partner', 'focus', 'description']) {
+      const element = root.querySelector(`[data-field="${field}"]`);
+      if (element) element.textContent = activity[field] || '';
     }
+    const slugLabel = root.querySelector('[data-field="slug"]');
+    if (slugLabel) slugLabel.textContent = `/activities/${activity.slug}`;
+    const logo = root.querySelector('[data-field="partnerLogo"]');
+    logo.src = safeImageUrl(activity.partnerLogo, new URL('assets/admit-unit-logo.png', document.baseURI).href);
+    logo.alt = activity.partner || 'ADMIT UNIT';
+    root.querySelector('[data-field="dateRange"]').textContent =
+      [activity.startDate, activity.endDate].filter(Boolean).join(' – ') || 'Ongoing';
+    const hero = root.querySelector('.carousel-container');
+    const images = activity.images.length ? activity.images : [{ title: activity.title, subtitle: activity.partner }];
+    const multiple = images.length > 1;
+    hero.dataset.slideCount = images.length;
+    hero.querySelector('.carousel-track').innerHTML =
+      images.map((image, i) => renderSlideItemHTML(image, activity, i, images.length)).join('');
+    hero.querySelector('.carousel-dots').innerHTML = multiple ? images.map((_, i) =>
+      `<button type="button" class="carousel-dot" aria-label="Go to slide ${i + 1}"></button>`).join('') : '';
+    hero.querySelectorAll('.carousel-arrow').forEach(arrow => { arrow.hidden = !multiple; });
+    content.style.display = 'block';
+    currentShareSlug = slug;
+    initCarousel(hero);
+    updateMetaTags(activityMeta(activity));
+  }
 
-    if (!activity) {
-      if (contentEl) contentEl.style.display = 'none';
-      if (notFoundEl) notFoundEl.style.display = 'block';
-      currentShareSlug = '';
-      return;
-    }
-
-    if (contentEl) contentEl.style.display = 'block';
-    if (notFoundEl) notFoundEl.style.display = 'none';
-
-    const titleEl = detailContainer.querySelector('[data-field="title"]');
-    if (titleEl) titleEl.textContent = activity.title;
-
-    const slugEl = detailContainer.querySelector('[data-field="slug"]');
-    if (slugEl) slugEl.textContent = `/activities/${activity.slug}`;
-
-    const partnerLogo = detailContainer.querySelector('[data-field="partnerLogo"]');
-    if (partnerLogo) {
-      partnerLogo.src = activity.partnerLogo || 'assets/admit-unit-logo.png';
-      partnerLogo.alt = activity.partner || 'Partner';
-    }
-
-    const partnerName = detailContainer.querySelector('[data-field="partner"]');
-    if (partnerName) partnerName.textContent = activity.partner || '';
-
-    const focusEl = detailContainer.querySelector('[data-field="focus"]');
-    if (focusEl) focusEl.textContent = activity.focus || '';
-
-    const dateRangeEl = detailContainer.querySelector('[data-field="dateRange"]');
-    if (dateRangeEl) {
-      const dates = [activity.startDate, activity.endDate].filter(Boolean).join(' – ');
-      dateRangeEl.textContent = dates || 'Ongoing';
-    }
-
-    const descEl = detailContainer.querySelector('[data-field="description"]');
-    if (descEl) descEl.textContent = activity.description || '';
-
-    const heroContainer = detailContainer.querySelector('.carousel-container');
-    const heroTrack = heroContainer ? heroContainer.querySelector('.carousel-track') : null;
-    const heroDots = heroContainer ? heroContainer.querySelector('.carousel-dots') : null;
-
-    if (heroContainer && heroTrack) {
-      const imgs = (activity.images && activity.images.length > 0) ? activity.images : [
-        { title: activity.title, subtitle: activity.partner, color: '#087ba7' }
-      ];
-      const multi = imgs.length > 1;
-      const trackImgs = multi ? [...imgs, imgs[0]] : imgs;
-
-      heroTrack.innerHTML = trackImgs.map((img, i) => renderSlideItemHTML(img, activity, i % imgs.length, imgs.length)).join('');
-      heroContainer.dataset.slideCount = imgs.length;
-
-      if (heroDots) {
-        heroDots.innerHTML = multi ? imgs.map((_, i) => `<button class="carousel-dot ${i === 0 ? 'active' : ''}" aria-label="Go to slide ${i + 1}"></button>`).join('') : '';
-      }
-
-      const arrows = heroContainer.querySelectorAll('.carousel-arrow');
-      arrows.forEach(arr => { arr.style.display = multi ? 'flex' : 'none'; });
-
-      initCarousel(heroContainer);
-    }
-
-    currentShareSlug = activity.slug;
-    const shareInput = document.querySelector('#share-modal-url');
-    if (shareInput && typeof getActivityShareUrl === 'function') {
-      shareInput.value = getActivityShareUrl(currentShareSlug);
-      shareInput.title = shareInput.value;
-    }
-
-    if (typeof updateMetaTags === 'function') {
-      updateMetaTags({
-        title: activity.title,
-        description: activity.description,
-        image: (activity.images && activity.images[0] && typeof activity.images[0] === 'string') 
-                 ? activity.images[0] 
-                 : (activity.partnerLogo || 'https://admitunit.asia/assets/admit-unit-light.png'),
-        url: getActivityShareUrl(activity.slug)
-      });
-    }
-  };
-
-  window.switchPageView = function(target, options = {}) {
-    const { scrollToTop = true, hash = '', route = '', packageKey = '', slug = '', updateUrl = true } = options;
-    
-    let cleanTarget = (target || '').split('?')[0].split('#')[0];
-    cleanTarget = cleanTarget.replace(/^\.\//, '').replace(/^\/+/, '').replace(/\.html$/, '');
-    
-    let viewId = PAGE_MAP[cleanTarget] || PAGE_MAP[target] || PAGE_MAP['#' + cleanTarget] || 'view-home';
-    let activitySlug = slug;
-
-    if (cleanTarget === 'khmer-enterprise-2025') {
-      viewId = 'view-activity';
-      activitySlug = 'export-market-development-program-2025';
-    } else if (cleanTarget === 'usaid-2024-2025') {
-      viewId = 'view-activity';
-      activitySlug = 'usaid-export-market-development-2024-2025';
-    } else if (cleanTarget === 'giz-export-packaging') {
-      viewId = 'view-activity';
-      activitySlug = 'export-labeling-and-packaging-for-market-entry';
-    } else if (cleanTarget.startsWith('activities/')) {
-      viewId = 'view-activity';
-      activitySlug = cleanTarget.replace(/^activities\//, '').replace(/\/$/, '');
-    }
-
-    if (viewId === 'view-activity') {
-      const finalSlug = activitySlug || currentShareSlug || '';
-      loadActivityInBundle(finalSlug);
-    } else {
-      if (typeof updateMetaTags === 'function') {
-        updateMetaTags({
-          title: VIEW_TITLES[viewId] || 'ADMIT UNIT',
-          url: getActivityShareUrl ? getActivityShareUrl('') : 'https://admitunit.asia/'
-        });
-      }
-    }
-
-    // Activate target view in DOM
-    pageViews.forEach(v => {
-      if (v.id === viewId) {
-        v.classList.add('active');
-      } else {
-        v.classList.remove('active');
-      }
+  function navigate(route, { updateUrl = true, focus = true } = {}) {
+    if (!route || !pages.has(route.page)) return;
+    const id = ++navigationId;
+    closeShareModal();
+    const active = document.getElementById(`view-${route.page}`);
+    views.forEach(view => {
+      const selected = view === active;
+      view.classList.toggle('active', selected);
+      view.hidden = !selected;
+      view.inert = !selected;
     });
-
-    // Update Header Navigation Indicator & aria-current
-    const activeHash = NAV_PAGE_MAP[viewId] || '';
-    navLinks.forEach(link => {
-      const href = (link.getAttribute('href') || '').split('?')[0];
-      if (activeHash && href === activeHash) {
+    const hash = routeHash(route);
+    if (updateUrl && window.location.hash !== hash) history.pushState(null, '', appUrl(hash));
+    lastLocation = location.href;
+    updateMetaTags({
+      title: titles[route.page], description: DEFAULT_META.description,
+      image: DEFAULT_META.image, url: appUrl(hash)
+    });
+    if (route.page === 'activity') renderDetail(route.slug, id);
+    else { currentShareSlug = ''; disposeCarousels(document.getElementById('view-activity')); }
+    if (route.page === 'contact') window.applyEnquiryOptions(route.route, route.packageKey);
+    const navHash = route.page === 'activity' ? '#activities' : `#${route.page}`;
+    document.querySelectorAll('header nav a').forEach(link => {
+      const selected = link.getAttribute('href') === navHash;
+      link.classList.toggle('nav-active', selected);
+      if (selected) {
         link.setAttribute('aria-current', 'page');
-        link.classList.add('nav-active');
-        if (typeof window.__setGlobalActiveNav === 'function') {
-          window.__setGlobalActiveNav(link);
-        } else if (typeof window.__moveHeaderIndicator === 'function') {
-          window.__moveHeaderIndicator(link);
-        }
-      } else {
-        link.removeAttribute('aria-current');
-        link.classList.remove('nav-active');
-      }
+        window.__setGlobalActiveNav?.(link);
+      } else link.removeAttribute('aria-current');
     });
-
-    // Hash & History Synchronization
-    if (updateUrl) {
-      const cleanUrl = getCleanUrlForView(viewId, activitySlug, hash, route, packageKey);
-      if (window.location.hash !== cleanUrl) {
-        if (window.history && window.history.pushState) {
-          window.history.pushState({ viewId, slug: activitySlug, hash, route, packageKey }, '', cleanUrl);
-        } else {
-          window.location.hash = cleanUrl;
-        }
-      }
-    }
-
-    // Handle Contact Route preselection if provided
-    if (viewId === 'view-contact' && route) {
-      const routeSelect = document.querySelector('#route');
-      if (routeSelect) {
-        routeSelect.value = route;
-        routeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    }
-
-    // Close mobile menu if open
-    const menuButton = document.querySelector('.menu');
-    const navElement = document.querySelector('nav');
-    if (menuButton && navElement && navElement.classList.contains('open')) {
-      menuButton.setAttribute('aria-expanded', 'false');
-      navElement.classList.remove('open');
-      const txt = menuButton.querySelector('.menu-text');
-      if (txt) txt.textContent = 'Menu';
-    }
-
-    // Scroll handling
-    if (hash) {
-      setTimeout(() => {
-        const hashEl = document.querySelector('#' + hash);
-        if (hashEl) {
-          hashEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } else if (scrollToTop) {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      }, 60);
-    } else if (scrollToTop) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
-
-  // Listen to browser Back / Forward buttons & Hash changes
-  window.addEventListener('popstate', () => parseRouteFromLocation(false));
-  window.addEventListener('hashchange', () => parseRouteFromLocation(false));
-
-  function parseRouteFromLocation(updateUrl = false) {
-    const loc = window.location;
-    let rawHash = (loc.hash || '').replace(/^#/, '');
-
-    let hashRoute = rawHash;
-    let hashQuery = '';
-    if (hashRoute.includes('?')) {
-      const parts = hashRoute.split('?');
-      hashRoute = parts[0];
-      hashQuery = parts[1] || '';
-    }
-
-    const hashParams = new URLSearchParams(hashQuery);
-    const searchParams = new URLSearchParams(loc.search);
-    const getParam = (k) => hashParams.get(k) || searchParams.get(k) || '';
-
-    // 1. Direct path or hash for activity
-    if (hashRoute.startsWith('activity-')) {
-      const slug = hashRoute.replace(/^activity-/, '');
-      window.switchPageView('activity', { slug, updateUrl });
-      return;
-    }
-    if (hashRoute === 'activity' || hashRoute === 'activity.html') {
-      const slug = getParam('slug');
-      window.switchPageView('activity', { slug, updateUrl });
-      return;
-    }
-
-    // 2. Query string ?slug=<slug>
-    if (getParam('slug')) {
-      window.switchPageView('activity', { slug: getParam('slug'), updateUrl });
-      return;
-    }
-
-    // 3. Hash route (e.g. contact, services, export, export-labeling, programmes, about, activities, terms, home)
-    const cleanKey = hashRoute.replace(/^\/+/, '').replace(/\/+$/, '');
-    if (cleanKey && (PAGE_MAP[cleanKey] || PAGE_MAP['#' + cleanKey] || PAGE_MAP[cleanKey + '.html'])) {
-      window.switchPageView(cleanKey, {
-        route: getParam('route'),
-        packageKey: getParam('package'),
-        hash: getParam('scroll'),
-        updateUrl
-      });
-      return;
-    }
-
-    // 4. In-page anchor on current or child page (e.g. #costing, #routes, #follow-up)
-    if (cleanKey) {
-      const el = document.querySelector('#' + cleanKey);
-      if (el) {
-        const parentView = el.closest('.page-view');
-        if (parentView) {
-          const vKey = parentView.id.replace('view-', '');
-          window.switchPageView(vKey, { hash: cleanKey, updateUrl });
-          return;
-        }
-      }
-    }
-
-    // Default to home
-    window.switchPageView('home', { updateUrl });
+    menuButton?.setAttribute('aria-expanded', 'false');
+    navElement?.classList.remove('open');
+    const menuText = menuButton?.querySelector('.menu-text');
+    if (menuText) menuText.textContent = 'Menu';
+    syncCarousels();
+    requestAnimationFrame(() => {
+      if (id !== navigationId) return;
+      const section = route.section && document.getElementById(route.section);
+      const target = section && active.contains(section) ? section :
+        route.page === 'activity' ? active : active.querySelector('h1') || active;
+      if (focus) { target.setAttribute('tabindex', '-1'); target.focus({ preventScroll: true }); }
+      if (section && active.contains(section)) target.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+      else window.scrollTo({ top: 0, behavior: scrollBehavior() });
+    });
   }
+  window.switchPageView = (target, options = {}) => {
+    const route = resolveRoute(new URL(target.startsWith('#') ? target : '#' + target, document.baseURI));
+    if (route) navigate({ ...route, ...options, section: options.hash || route.section }, options);
+  };
+  function routeLocation(focus = true) {
+    if (lastLocation === location.href) return;
+    navigate(resolveRoute(new URL(location.href)) || { page: 'home' }, { updateUrl: false, focus });
+  }
+  window.addEventListener('popstate', () => routeLocation());
+  window.addEventListener('hashchange', () => routeLocation());
 
-  // Intercept all link clicks across the entire document
-  document.addEventListener('click', (e) => {
-    const link = e.target.closest('a');
-    if (!link) return;
-
+  document.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest('a[href]');
+    if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
     const href = link.getAttribute('href');
-    if (!href) return;
-
-    // Allow browser default for mailto, tel, downloads
-    if (href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
-    if (link.hasAttribute('download') || href.includes('.pdf')) return;
-
-    // External URLs (except admitunit.asia internal links)
-    if (href.startsWith('http://') || href.startsWith('https://')) {
-      if (!href.includes('admitunit.asia') && (typeof window === 'undefined' || !href.includes(window.location.host))) {
-        return;
-      }
-    }
-
-    // Activity hash or path links
-    if (href.startsWith('#activity-') || href.startsWith('activities/') || href.startsWith('/activities/')) {
-      const actSlug = href.replace(/^#activity-/, '').replace(/^\/?activities\//, '').replace(/\/$/, '').split('?')[0].split('#')[0];
-      e.preventDefault();
-      window.switchPageView('activity', { slug: actSlug });
+    if (href === '#main') {
+      event.preventDefault();
+      const main = document.getElementById('main');
+      main.focus({ preventScroll: true });
+      main.scrollIntoView({ behavior: scrollBehavior() });
       return;
     }
-
-    // In-page hash or hash route (e.g. #contact, #services, #home, #costing)
-    if (href.startsWith('#')) {
-      const raw = href.replace(/^#/, '');
-      if (raw === 'home' || raw === 'main' || raw === '') {
-        e.preventDefault();
-        window.switchPageView('home');
-        return;
-      }
-
-      // Check if it has query params like #contact?route=BUSINESS
-      let targetName = raw;
-      let targetQuery = '';
-      if (raw.includes('?')) {
-        const parts = raw.split('?');
-        targetName = parts[0];
-        targetQuery = parts[1] || '';
-      }
-      const qParams = new URLSearchParams(targetQuery);
-
-      if (PAGE_MAP[targetName] || PAGE_MAP['#' + targetName]) {
-        e.preventDefault();
-        window.switchPageView(targetName, {
-          route: qParams.get('route') || '',
-          packageKey: qParams.get('package') || '',
-          hash: qParams.get('scroll') || ''
-        });
-        return;
-      }
-
-      // Check if it's an in-page section ID like #costing
-      const el = document.querySelector('#' + targetName);
-      if (el) {
-        const parentView = el.closest('.page-view');
-        if (parentView && !parentView.classList.contains('active')) {
-          e.preventDefault();
-          const vKey = parentView.id.replace('view-', '');
-          window.switchPageView(vKey, { hash: targetName });
-          return;
-        }
-        e.preventDefault();
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        return;
-      }
+    const url = new URL(href, document.baseURI);
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin !== location.origin) return;
+    const basePath = new URL('.', document.baseURI).pathname;
+    if (!url.pathname.startsWith(basePath)) return;
+    const path = url.pathname.slice(basePath.length);
+    if (path && !/^(?:index\.html|(?:home|services|export|export-labeling|programmes|about|activities|activity|contact|terms)(?:\.html)?\/?|activities\/[^/]+\/?|khmer-enterprise-2025|usaid-2024-2025|giz-export-packaging)$/.test(path)) return;
+    const route = resolveRoute(url);
+    if (!route) return;
+    event.preventDefault();
+    if (route.page === 'contact') {
+      route.route = link.dataset.route || route.route;
+      route.packageKey = link.dataset.package || route.packageKey;
     }
-
-    // Relative links fallback (e.g. contact.html?route=BUSINESS, services.html#costing, etc.)
-    e.preventDefault();
-    const [pathPart, queryHash] = href.split('?');
-    let query = '';
-    let hash = '';
-    if (queryHash) {
-      const parts = queryHash.split('#');
-      query = parts[0] || '';
-      hash = parts[1] || '';
-    } else if (pathPart.includes('#')) {
-      const parts = pathPart.split('#');
-      hash = parts[1] || '';
-    }
-
-    const cleanPath = pathPart.split('#')[0].replace(/^\.\//, '').replace(/\.html$/, '');
-    const params = new URLSearchParams(query);
-    window.switchPageView(cleanPath || 'home', {
-      route: params.get('route') || '',
-      packageKey: params.get('package') || '',
-      slug: params.get('slug') || '',
-      hash: hash
-    });
+    navigate(route);
   });
-
-  // Initial page load routing
-  setTimeout(() => {
-    parseRouteFromLocation(false);
-  }, 30);
+  routeLocation(false);
 })();

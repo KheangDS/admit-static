@@ -2,6 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
+    <!-- Resolve assets correctly when a host serves this bundle for a legacy clean URL. -->
+    <script>
+      (() => {
+        const match = location.pathname.match(/\/(?:home|services|export|export-labeling|programmes|about|activities(?:\/[^/]+)?|activity|contact|terms|khmer-enterprise-2025|usaid-2024-2025|giz-export-packaging)(?:\.html)?\/?$/);
+        if (match) {
+          const base = document.createElement('base');
+          base.href = location.origin + location.pathname.slice(0, match.index + 1);
+          document.head.appendChild(base);
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>ADMIT UNIT · The Standard Implementer</title>
     <meta name="description" content="Business implementation, export market development and institutional programmes for Cambodian enterprises. Clear scope, practical delivery and editable handover.">
@@ -20,14 +31,14 @@
     <link rel="canonical" href="https://admitunit.asia/">
     <link rel="icon" type="image/png" href="assets/favicon.png">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    <link rel="stylesheet" href="css/style.css?v=d7fdeb4d99c5">
+    <link rel="stylesheet" href="css/style.css?v=b0a9854b4b2d">
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
     <header>
       <div class="navwrap">
         <a class="brand" href="#home" aria-label="ADMIT UNIT home">
-          <img src="assets/admit-unit-logo.png" alt="ADMIT UNIT — The Standard Implementer" width="180" height="37">
+          <img src="assets/admit-unit-logo.png?v=c47f9893f996" alt="ADMIT UNIT — From practice to a stronger business" width="1702" height="289">
         </a>
                 <button class="menu" aria-expanded="false" aria-controls="navigation" aria-label="Toggle navigation menu">
           <span class="menu-icon-box" aria-hidden="true">
@@ -49,7 +60,8 @@
         </nav>
       </div>
     </header>
-    <main id="main">
+    <noscript><p class="wrap">This website needs JavaScript for navigation and enquiries. Contact <a href="mailto:om@admitunit.asia">om@admitunit.asia</a> or call <a href="tel:+85578234598">078 234 598</a>.</p></noscript>
+    <main id="main" tabindex="-1">
 
       <!-- ===================================================================
            PAGE VIEW: Home (index.html)
@@ -58,7 +70,7 @@
 <section class="hero wrap">
         <div>
           <p class="eyebrow">FOR CAMBODIAN BUSINESSES, BUYERS & PROGRAMMES</p>
-          <h1>Put your next business priority <em>into practice.</em></h1>
+          <h1>We help SMEs overcome business gaps and access export markets through <em>hands-on implementation.</em></h1>
           <p class="lead">Working tools built from your records. Export activity focused on a defined opportunity. Programmes that help enterprises implement.</p>
           <div class="actions">
             <a class="button" href="#contact?route=BUSINESS">Book a free fit call <span aria-hidden="true">↗</span></a>
@@ -182,8 +194,8 @@
                 <line x1="3" y1="10" x2="21" y2="10"/>
               </svg>
             </div>
-            <h3>No Activities Published Yet</h3>
-            <p>Our upcoming trade development programmes and cohort activities will appear here once officially scheduled.</p>
+            <h3>Not Found</h3>
+            <p>No activities are available at the moment.</p>
           </div>
         </div>
         <p><a class="textlink" href="#activities">View all activities →</a></p>
@@ -1193,8 +1205,8 @@
                 <line x1="3" y1="10" x2="21" y2="10"/>
               </svg>
             </div>
-            <h3>No Activities Published Yet</h3>
-            <p>Our upcoming trade development programmes and cohort activities will appear here once officially scheduled.</p>
+            <h3>Not Found</h3>
+            <p>No activities are available at the moment.</p>
           </div>
         </div>
       </section>
@@ -1341,7 +1353,7 @@
             <div class="form-privacy-note">
               <svg class="privacy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
               <div>
-                <strong>Confidentiality notice:</strong> Share only a high-level briefing here. Sensitive commercial files, internal costing records, and supplier data are only reviewed after agreeing on a written scope.
+                <strong>Confidentiality notice:</strong> Submitting sends this brief to ADMIT UNIT’s enquiry API to request a response. Share only a high-level briefing here, not sensitive commercial files, internal costing records, or supplier data. See our <a href="#terms">privacy notice</a>.
               </div>
             </div>
 
@@ -1352,10 +1364,18 @@
             </button>
 
             <!-- Subtle inline feedback note after click -->
-            <div id="contact-submit-status" hidden class="form-submit-fallback">
+            <div id="contact-submit-status" hidden class="form-submit-fallback" role="status" aria-live="polite">
               <p>
                 <strong>Sending your enquiry...</strong> If you encounter any connection issues, you can also email us directly at <a href="mailto:om@admitunit.asia">om@admitunit.asia</a>.
               </p>
+            </div>
+            <div id="emailresult" class="form-submit-fallback" hidden>
+              <p>No automatic email or clipboard action was taken. Review your draft, then choose how to send it.</p>
+              <p><a id="emailopen" class="button secondary" href="mailto:om@admitunit.asia">Open email app</a> <button id="copy" class="button secondary" type="button">Copy message</button></p>
+              <p id="copystatus" role="status"></p>
+              <label for="emailcopy">Your enquiry draft</label>
+              <textarea id="emailcopy" class="form-control" rows="10" readonly></textarea>
+              <p>Opening your email app does not send the message. You must send it there yourself.</p>
             </div>
           </form>
         </div>
@@ -1478,6 +1498,7 @@
            =================================================================== -->
       <div id="view-activity" class="page-view" data-page="activity.html" data-title="Activity Detail View (activity.html)">
 <section class="wrap section" data-activity-detail-page>
+        <p id="activity-detail-loading" role="status" hidden>Loading activity…</p>
         <!-- Dynamic Activity Detail Content -->
         <div id="activity-detail-content" style="display:none;">
           <div class="activity-detail-wrapper">
@@ -1491,7 +1512,7 @@
             <!-- Activity Title -->
             <h1 class="activity-detail-title" data-field="title"></h1>
 
-            <!-- Hero Image Carousel (Up to 3 images, infinite forward loop every 2s) -->
+            <!-- Hero carousel: manual controls and pausable five-second autoplay -->
             <div class="carousel-container activity-detail-hero" data-slide-count="1">
               <span class="carousel-counter-badge">1 / 1</span>
               <div class="carousel-track">
@@ -1567,8 +1588,8 @@
               <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
           </div>
-          <h2 style="font-size:24px;font-weight:700;color:var(--navy-900);margin-bottom:12px;">Activity Not Found</h2>
-          <p style="color:var(--slate-600);max-width:480px;margin:0 auto 24px;line-height:1.6;">The requested activity could not be found or has not been published yet.</p>
+          <h2 style="font-size:24px;font-weight:700;color:var(--navy-900);margin-bottom:12px;">Activity unavailable</h2>
+          <p style="color:var(--slate-600);max-width:480px;margin:0 auto 24px;line-height:1.6;">We could not load this activity. It may be unpublished, or the service may be temporarily unavailable. Try refreshing or return to all activities.</p>
           <a class="button" href="#activities">← Back to all activities</a>
         </div>
 
@@ -1616,7 +1637,7 @@
           </div>
         </details>
         <h2>Privacy for this website</h2>
-        <p>The enquiry form prepares an email locally in your browser. This revision contains no website enquiry database, analytics script or tracking cookie. Your chosen email service handles a message when you send it. Hosting infrastructure may process technical access information under its applicable policies.</p>
+        <p>When you submit the enquiry form, your name, organization, contact details and brief are sent to ADMIT UNIT’s configured enquiry service to request a response. If delivery cannot be confirmed, your draft stays in the page and you may choose to copy it or open your email app to send it yourself. Clipboard access occurs only when you choose a copy action. Your email provider handles messages you send from your email app. This frontend does not add analytics scripts or tracking cookies; hosting and API infrastructure may process request data and technical access information under their applicable policies.</p>
         <p>ADMIT UNIT uses received enquiries to respond and discuss the requested work. Contact om@admitunit.asia about access, correction or deletion of enquiry information, subject to applicable retention obligations. Secure sharing, record retention and authorized sponsor access are agreed before client work.</p>
         <h2>Questions before booking</h2>
         <details class="scope">
@@ -1639,7 +1660,7 @@
       <div class="wrap footgrid">
         <div class="foot-col-brand">
           <a class="brand" href="#home" aria-label="ADMIT UNIT home">
-          <img src="assets/admit-unit-logo.png" alt="ADMIT UNIT — The Standard Implementer" width="180" height="37">
+            <img src="assets/admit-unit-logo.png?v=c47f9893f996" alt="ADMIT UNIT — From practice to a stronger business" width="1702" height="289">
         </a>
           <p class="foot-tagline">
             The business implementation service<br>within ADMIT GROUP.
@@ -1664,6 +1685,7 @@
             <span class="foot-hours-sub">Excluding national public holidays</span>
           </p>
           <nav class="foot-nav" aria-label="Footer Working Together">
+            <a href="https://flowproject.admitunit.asia/" target="_blank" rel="noopener noreferrer">Project management</a>
             <a href="ADMIT_UNIT_Service_Packages_V4_1_Enhanced_Export_Labeling_Client.pdf" download>Download pitch deck (PDF)</a>
             <a href="#terms">Service terms &amp; privacy</a>
           </nav>
@@ -1699,13 +1721,13 @@
         </div>
       </div>
     </footer>
-    <div id="share-modal" class="share-modal-backdrop hidden" onclick="if(event.target === this) closeShareModal()">
-      <div class="share-modal-dialog">
+    <div id="share-modal" class="share-modal-backdrop hidden">
+      <div class="share-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
         <!-- Header -->
         <div class="share-modal-header">
           <div>
             <span class="share-modal-eyebrow">Share Activity</span>
-            <h3 class="share-modal-title" data-share-title>Export Market Development Program 2025</h3>
+            <h3 id="share-modal-title" class="share-modal-title" data-share-title>Export Market Development Program 2025</h3>
           </div>
           <button type="button" onclick="closeShareModal()" class="share-modal-close" aria-label="Close modal">×</button>
         </div>
@@ -1797,7 +1819,7 @@
       </div>
     </div>
     <!-- Central API Configuration (FastAPI backend endpoint) -->
-    <script src="js/config.js?v=db941a3bdbab"></script>
-    <script src="js/main.js?v=27d0316bc0f5" defer></script>
+    <script src="js/config.js?v=b8eb8291bc47"></script>
+    <script src="js/main.js?v=848c6e617a3a" defer></script>
   </body>
 </html>
